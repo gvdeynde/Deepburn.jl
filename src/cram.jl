@@ -4,6 +4,8 @@ using LinearAlgebra
 using GenericLinearAlgebra
 using Polynomials
 
+include("brent.jl")
+
 """
 Struct that holds a Chebyshev Rational Approximation
 """
@@ -17,6 +19,25 @@ struct cra{T <: AbstractFloat}
 end
 
 cra(name, order, rinf, alpha, theta) = cra(name, order, rinf, alpha, theta, Dict())
+
+function Base.show(io::IO, c::cra)
+    println(io, c.name, "  order = $(c.order)")
+    println(io, "r_inf = $(c.rinf)")
+    println(io, "alpha")
+    for i=1:c.order
+        println(io, c.alpha[i])
+    end
+
+    println(io, "theta")
+    for i=1:c.order
+        println(io, c.theta[i])
+    end
+
+    println(io, "meta")
+    for (key, value) in c.meta
+        println(key, ": ", value)
+    end
+end
 
 """
 Create a polynomial from roots
@@ -189,7 +210,11 @@ function CarathéodoryFejér(order::Int=2; prec::Int=0, start_order::Int=order, 
         res = _CF_Float64(order, start_order, K, nf)
     end
 
-    return res
+    if start_order == order
+        return res[1]
+    else
+        return res
+    end
 
 end
 
@@ -244,9 +269,6 @@ function cra_abs_error(c::cra, x::Union{Float64, BigFloat, Vector{Float64}, Vect
         xx = BigFloat.(string.(x))
 
     else
-        alpha = float.(c.alpha)
-        theta = float.(c.theta)
-        rinf = float.(c.rinf)
         xx = x
     end
 
@@ -269,9 +291,6 @@ function cra_rel_error(c::cra, x::Union{Float64, BigFloat, Vector{Float64}, Vect
         xx = BigFloat.(string.(x))
 
     else
-        alpha = float.(c.alpha)
-        theta = float.(c.theta)
-        rinf = float.(c.rinf)
         xx = x
     end
 
@@ -282,4 +301,51 @@ function cra_rel_error(c::cra, x::Union{Float64, BigFloat, Vector{Float64}, Vect
     end
 
     return error
+end
+
+function cra_extrema(c::cra; prec::Int=0)
+    if prec > 0
+        oldprec = precision(BigFloat)
+        setprecision(BigFloat, prec)
+
+        extrema = _cra_extrema_Float64(c)
+
+        setprecision(BigFloat, oldprec)
+    else
+        extrema = _cra_extrema_BigFloat(c)
+    end
+
+    return extrema
+end
+
+function _cra_extrema_Float64(c::cra)
+    
+    extrema = zeros(2*c.order)
+    
+    #Brute force approach
+    sz = 4000
+
+    xinit = -(10.) .^ range(pmin,pmax, sz)
+    fevals = cra_abs_error(CF, xinit)
+    signchange = fevals[1:sz-1].*fevals[2:sz]
+
+    idx = findall(<(0), signchange)
+
+    nrts = length(idx)
+
+    roots = zeros(nrts)
+
+    for i=1:nrts
+        roots[i] = brent(t->cra_abs_error(CF,t), xinit[idx[i]], xinit[idx[i]+1])
+    end
+    sort!(roots)
+    
+    
+    # Find all extrema between two zeros
+    for i=1:2*c.order
+        opt = optimize(t->-(cra_abs_error(CF,t))^2, roots[i], roots[i+1], Brent(); rel_tol=1e-12)
+        extrema[i] = opt.minimizer
+    end
+    
+    return extrema, roots
 end
