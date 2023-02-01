@@ -231,7 +231,7 @@ function (c::cra)(x::Union{Float64, BigFloat, Vector{Float64}, Vector{BigFloat}}
         xx = BigFloat.(string.(x))
 
     else
-        two = 2.0
+        two = 2
         alpha = float.(c.alpha)
         theta = float.(c.theta)
         rinf = float.(c.rinf)
@@ -304,48 +304,49 @@ function cra_rel_error(c::cra, x::Union{Float64, BigFloat, Vector{Float64}, Vect
 end
 
 function cra_extrema(c::cra; prec::Int=0)
+    #Brute force approach
+    sz = 6000
+    pmin = -7
+    pmax = +7
+
     if prec > 0
         oldprec = precision(BigFloat)
         setprecision(BigFloat, prec)
-
-        extrema = _cra_extrema_Float64(c)
-
-        setprecision(BigFloat, oldprec)
+        xinit = -(BigFloat("10")) .^ range(pmin,pmax, sz)
+        tol = eps(BigFloat)*10000
+        T = BigFloat
     else
-        extrema = _cra_extrema_BigFloat(c)
+        xinit = -(10.) .^ range(pmin,pmax, sz)
+        tol = 1.0e-12
+        T = Float64
     end
 
-    return extrema
-end
+    extrema = zeros(T, 2*c.order)
 
-function _cra_extrema_Float64(c::cra)
-    
-    extrema = zeros(2*c.order)
-    
-    #Brute force approach
-    sz = 4000
-
-    xinit = -(10.) .^ range(pmin,pmax, sz)
-    fevals = cra_abs_error(CF, xinit)
+    fevals = cra_abs_error(c, xinit, prec=prec)
     signchange = fevals[1:sz-1].*fevals[2:sz]
 
     idx = findall(<(0), signchange)
 
     nrts = length(idx)
 
-    roots = zeros(nrts)
+    roots = zeros(T, nrts)
 
     for i=1:nrts
-        roots[i] = brent(t->cra_abs_error(CF,t), xinit[idx[i]], xinit[idx[i]+1])
+        roots[i] = brentzero(t->cra_abs_error(c,t), xinit[idx[i]], xinit[idx[i]+1], tol=tol)
     end
     sort!(roots)
-    
-    
+
+
     # Find all extrema between two zeros
     for i=1:2*c.order
-        opt = optimize(t->-(cra_abs_error(CF,t))^2, roots[i], roots[i+1], Brent(); rel_tol=1e-12)
-        extrema[i] = opt.minimizer
+        extrema[i] = brentmin(t->-(cra_abs_error(c,t)/c.rinf)^2, roots[i], roots[i+1], tol=tol)
     end
-    
+
+    if prec > 0
+        setprecision(BigFloat, oldprec)
+    end
+
     return extrema, roots
 end
+
